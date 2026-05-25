@@ -1,0 +1,96 @@
+# Config consumed by `figma-code-dl` when invoked with `--trim` and / or
+# `--icons`. Both passes are independent; either, both, or neither can be
+# enabled per-invocation.
+#
+# Goal: produce TSX that's small enough to read with an LLM without losing
+# anything semantic — collapse Figma instances into your own components
+# (handled by `--map`), substitute icon `<img>` tags with reusable React
+# components (`--icons` + this `[icons]` section), and drop redundant Tailwind
+# classes / Figma-internal layer attributes (`--trim` + this `[trim]` section).
+
+[trim]
+# Class names removed when they appear as a whole token.
+exclude_exact = [
+  "relative",          # 99% of the time it's structural, not load-bearing
+  "absolute",          # ditto — kept inside icon-mask blocks (see strip_attributes notes)
+  "block",             # default for div/img
+  "shrink-0",          # Auto Layout default in Figma → Tailwind output
+  "content-stretch",   # Figma-internal marker, not a real Tailwind class
+  "max-w-none",        # only meaningful inside `absolute inset-0` blocks we strip anyway
+  "size-full",         # filler on <img> inside icon overlays
+]
+
+# Class names removed when they start with any of these prefixes.
+# Catches arbitrary-value variants (`inset-[12.5%]`, `mask-position-[-3px_-3px]`, etc.)
+exclude_prefixes = [
+  "inset-",            # absolute-position fillers for icon overlays
+  "mask-",             # mask-alpha / mask-intersect / mask-no-clip / mask-position / mask-size …
+]
+
+# When trimming leaves `className=""`, drop the whole attribute.
+drop_empty_classname = true
+
+# JSX attributes removed unconditionally.
+# IMPORTANT: only safe to strip AFTER --map has consumed data-name for instance
+# replacement (which is the order `figma-code-dl` runs internally).
+strip_attributes = [
+  "data-node-id",
+  "data-name",
+]
+
+# ---------------------------------------------------------------------------
+# Icon component substitution (--icons)
+# ---------------------------------------------------------------------------
+# Replaces `<img src={imgXxx} ... />` with a `<ComponentName />` reference
+# pulled from a directory of reusable React icon components. The `const
+# imgXxx = "<url>"` declaration is deleted (no asset download needed) and a
+# matching `import` is injected.
+#
+# Matching order, per imgXxx:
+#   1. `[icons.overrides]` exact entry (highest priority)
+#   2. PascalCase-derived candidate (strip the `img` prefix) found as a
+#      `.tsx` file in `component_dir`
+#   3. With `strip_trailing_digits = true`, fall back by stripping trailing
+#      digits (`ChevronForward1` -> `ChevronForward`)
+#
+# Unmatched const decls are left as-is (and will still go through the asset
+# download pass if `--download-assets` is set).
+
+[icons]
+# Filesystem directory scanned for existing icon React components (*.tsx).
+# Each *.tsx in this dir (PascalCase stem) is treated as a candidate. Set to
+# the actual location in your repo (e.g. "src/components/icons" or
+# "src/icons"). Leave unset to disable auto-scan; overrides still work.
+#
+# component_dir = "src/components/icons"
+
+# Module specifier used in generated imports. Combined with the matched
+# component name as `<module>/<ComponentName>`. Required for any match.
+module = "@/components/icons"
+
+# Export style for scanned components: "named" (default) or "default".
+default_export = "named"
+
+# If the exact PascalCase candidate isn't found, retry by stripping trailing
+# digits. Useful because Figma renders the same icon used twice as
+# `imgChevronForward` and `imgChevronForward1`.
+strip_trailing_digits = true
+
+# Forward the `<img className="...">` value to the component as
+# `<Component className="..." />`. Set to false to drop className entirely.
+forward_classname = true
+
+# Convert any remaining `const imgXxx = "./assets/foo.svg"` (i.e. local SVG
+# assets that didn't match an override or scan) into:
+#   `import Xxx from "./assets/foo.svg"`  +  `<img src={imgXxx} />` → `<Xxx />`
+# Assumes the project's bundler returns a React component for default SVG
+# imports (Vite + svgr, webpack + @svgr/webpack, etc.).
+# This branch runs AFTER --download-assets, on local paths only.
+local_svg_import = true
+
+# Explicit overrides take priority over auto-scan. Use either form:
+#   imgFoo = "ComponentName"
+#   imgFoo = { name = "ComponentName", module = "@/x", export = "default" }
+# [icons.overrides]
+# imgChevronForward1 = "ChevronForward"
+# imgLogo = { name = "Logo", module = "@/branding", export = "default" }

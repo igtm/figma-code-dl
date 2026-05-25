@@ -1,0 +1,11 @@
+/target
+
+# Local working area / per-project artifacts (not committed).
+/tmp
+/.claude
+
+# `.figma/config.toml` IS committed (project-level rules for trim / icons).
+# `.figma/variables.json` and its raw companion are auto-generated per Figma
+# file and contain that file's variable names + hex values — gitignore them.
+/.figma/variables.json
+/.figma/variables.raw.json

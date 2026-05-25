@@ -1,0 +1,153 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_upload: ${{ steps.release_state.outputs.should_upload }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          if [ -z "${version}" ]; then
+            echo "ERROR: Failed to determine package version from Cargo.toml" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - id: release_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+
+          if git rev-parse "${tag}" >/dev/null 2>&1; then
+            tag_sha="$(git rev-list -n 1 "${tag}")"
+            if [ "${tag_sha}" = "${GITHUB_SHA}" ]; then
+              echo "should_upload=true" >> "${GITHUB_OUTPUT}"
+              echo "Release tag ${tag} already points to ${GITHUB_SHA}; assets will be refreshed."
+            else
+              echo "should_upload=false" >> "${GITHUB_OUTPUT}"
+              echo "Release tag ${tag} already exists at ${tag_sha}; skipping release upload."
+            fi
+          else
+            echo "should_upload=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Create release
+        if: steps.release_state.outputs.should_upload == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.version.outputs.tag }}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists."
+          else
+            gh release create "${tag}" \
+              --title "${tag}" \
+              --generate-notes \
+              --target "${GITHUB_SHA}"
+          fi
+
+  release:
+    name: release ${{ matrix.target }}
+    needs: prepare-release
+    if: needs.prepare-release.outputs.should_upload == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use-cross: false
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use-cross: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            use-cross: false
+          - os: macos-15
+            target: aarch64-apple-darwin
+            use-cross: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use-cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cross
+        if: matrix.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.use-cross }}" == "true" ]]; then
+            cross build --release --locked --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked --target "${{ matrix.target }}"
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin_name="figma-code-dl"
+          tag="${{ needs.prepare-release.outputs.tag }}"
+          target="${{ matrix.target }}"
+          bin_path="target/${target}/release/${bin_name}"
+
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            bin_path="${bin_path}.exe"
+          fi
+
+          archive_name="${bin_name}_${tag}_${target}.tar.gz"
+          tar -czf "${archive_name}" -C "$(dirname "${bin_path}")" "$(basename "${bin_path}")"
+          echo "archive_name=${archive_name}" >> "${GITHUB_ENV}"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.prepare-release.outputs.tag }}" "${archive_name}" --clobber
