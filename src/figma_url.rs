@@ -46,10 +46,8 @@ mod tests {
 
     #[test]
     fn parses_standard_design_url() {
-        let t = parse(
-            "https://www.figma.com/design/AbCdEfGhIjKlMnOpQrStUv/Foo?node-id=1-2&m=dev",
-        )
-        .unwrap();
+        let t = parse("https://www.figma.com/design/AbCdEfGhIjKlMnOpQrStUv/Foo?node-id=1-2&m=dev")
+            .unwrap();
         assert_eq!(t.file_key, "AbCdEfGhIjKlMnOpQrStUv");
         assert_eq!(t.node_id, "1:2");
     }

@@ -35,11 +35,7 @@ pub struct DumpReport {
 }
 
 /// Call `get_variable_defs` for the given node, parse, and write the file.
-pub async fn dump(
-    client: &McpClient,
-    node_id: &str,
-    out_path: &Path,
-) -> Result<DumpReport> {
+pub async fn dump(client: &McpClient, node_id: &str, out_path: &Path) -> Result<DumpReport> {
     let blocks = client
         .call_tool(
             "get_variable_defs",
@@ -59,8 +55,8 @@ pub async fn dump(
     {
         std::fs::create_dir_all(parent).ok();
     }
-    let raw_json = serde_json::to_vec_pretty(&blocks)
-        .context("serializing raw variable-defs response")?;
+    let raw_json =
+        serde_json::to_vec_pretty(&blocks).context("serializing raw variable-defs response")?;
     std::fs::write(&raw_path, &raw_json)
         .with_context(|| format!("writing raw response to {}", raw_path.display()))?;
 
@@ -89,8 +85,7 @@ pub async fn dump(
         std::fs::create_dir_all(parent).ok();
     }
     let json = serde_json::to_vec_pretty(&file).context("serializing variables file")?;
-    std::fs::write(out_path, &json)
-        .with_context(|| format!("writing {}", out_path.display()))?;
+    std::fs::write(out_path, &json).with_context(|| format!("writing {}", out_path.display()))?;
 
     Ok(DumpReport {
         variables_total,
@@ -102,7 +97,10 @@ pub async fn dump(
 fn with_extra_extension(p: &Path, ext: &str) -> PathBuf {
     // `foo.json` -> `foo.raw.json`. Falls back to `foo.<ext>` when there is
     // no current extension.
-    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("variables");
+    let stem = p
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("variables");
     let mut name = String::from(stem);
     name.push('.');
     name.push_str(ext);
@@ -117,10 +115,7 @@ fn now_iso() -> String {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let (y, mo, d, h, mi, s) = epoch_to_ymd_hms(secs);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y, mo, d, h, mi, s
-    )
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
 }
 
 fn epoch_to_ymd_hms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
@@ -346,7 +341,7 @@ fn parse_hex_string(s: &str) -> Option<String> {
     let expanded: String = match chars.len() {
         3 if chars.iter().all(|c| c.is_ascii_hexdigit()) => chars
             .iter()
-            .flat_map(|c| std::iter::repeat(*c).take(2))
+            .flat_map(|c| std::iter::repeat_n(*c, 2))
             .collect(),
         6 if chars.iter().all(|c| c.is_ascii_hexdigit()) => s.to_string(),
         8 if chars.iter().all(|c| c.is_ascii_hexdigit()) => s[..6].to_string(),

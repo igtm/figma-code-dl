@@ -76,10 +76,7 @@ impl Imports {
                     .collect();
                 parts.push(format!("{{ {} }}", named.join(", ")));
             }
-            out.push_str(&format!(
-                "import {} from \"{module}\";\n",
-                parts.join(", ")
-            ));
+            out.push_str(&format!("import {} from \"{module}\";\n", parts.join(", ")));
         }
         out.push('\n');
         out

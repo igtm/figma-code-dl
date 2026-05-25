@@ -179,10 +179,10 @@ fn extract_result(value: Value, expected_id: u64) -> Result<Value> {
     if let Some(err) = value.get("error") {
         bail!("MCP JSON-RPC error: {err}");
     }
-    if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
-        if id != expected_id {
-            bail!("MCP response id {id} did not match expected {expected_id}");
-        }
+    if let Some(id) = value.get("id").and_then(|v| v.as_u64())
+        && id != expected_id
+    {
+        bail!("MCP response id {id} did not match expected {expected_id}");
     }
     value
         .get("result")

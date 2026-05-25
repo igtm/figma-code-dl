@@ -97,10 +97,7 @@ fn trims_realistic_snippet() {
 
 #[test]
 fn loads_config_from_disk() {
-    let tmp = std::env::temp_dir().join(format!(
-        "figma-code-dl-trim-{}.toml",
-        std::process::id()
-    ));
+    let tmp = std::env::temp_dir().join(format!("figma-code-dl-trim-{}.toml", std::process::id()));
     std::fs::write(
         &tmp,
         r#"

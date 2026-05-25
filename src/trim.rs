@@ -52,8 +52,8 @@ impl TrimConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let bytes = std::fs::read_to_string(path)
             .with_context(|| format!("reading trim config {}", path.display()))?;
-        let cfg: ConfigFile = toml::from_str(&bytes)
-            .with_context(|| format!("parsing TOML {}", path.display()))?;
+        let cfg: ConfigFile =
+            toml::from_str(&bytes).with_context(|| format!("parsing TOML {}", path.display()))?;
         Ok(cfg.trim)
     }
 }

@@ -94,8 +94,8 @@ impl IconConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let s = std::fs::read_to_string(path)
             .with_context(|| format!("reading icons config {}", path.display()))?;
-        let cf: ConfigFile = toml::from_str(&s)
-            .with_context(|| format!("parsing TOML {}", path.display()))?;
+        let cf: ConfigFile =
+            toml::from_str(&s).with_context(|| format!("parsing TOML {}", path.display()))?;
         Ok(cf.icons)
     }
 }
@@ -308,7 +308,10 @@ fn make_resolved(component: &str, module_prefix: &str, export_style: &str) -> Re
 /// PascalCase candidate from `imgXxx` (strip the `img` prefix). The const name
 /// is already PascalCase after `img`, so no further transformation is needed.
 fn derive_candidate(const_name: &str) -> String {
-    const_name.strip_prefix("img").unwrap_or(const_name).to_string()
+    const_name
+        .strip_prefix("img")
+        .unwrap_or(const_name)
+        .to_string()
 }
 
 fn strip_trailing_digits(s: &str) -> String {
@@ -353,9 +356,8 @@ fn const_decl_re() -> &'static Regex {
 /// Walk `const imgXxx = "<url>";` declarations and return `name -> url`.
 fn const_urls(src: &str) -> BTreeMap<&str, String> {
     static FULL_RE: OnceLock<Regex> = OnceLock::new();
-    let re = FULL_RE.get_or_init(|| {
-        Regex::new(r#"const\s+(img[A-Za-z0-9_]+)\s*=\s*"([^"]+)"\s*;"#).unwrap()
-    });
+    let re = FULL_RE
+        .get_or_init(|| Regex::new(r#"const\s+(img[A-Za-z0-9_]+)\s*=\s*"([^"]+)"\s*;"#).unwrap());
     re.captures_iter(src)
         .filter_map(|cap| {
             let name = cap.get(1)?.as_str();
@@ -416,8 +418,7 @@ fn has_non_img_reference(src: &str, name: &str) -> bool {
         let abs = pos + rel;
         // Word boundaries: char before/after must not be identifier-like.
         let before_ok = abs == 0
-            || !src.as_bytes()[abs - 1].is_ascii_alphanumeric()
-                && src.as_bytes()[abs - 1] != b'_';
+            || !src.as_bytes()[abs - 1].is_ascii_alphanumeric() && src.as_bytes()[abs - 1] != b'_';
         let after_off = abs + name.len();
         let after_ok = after_off >= src.len()
             || (!src.as_bytes()[after_off].is_ascii_alphanumeric()
@@ -489,7 +490,7 @@ mod tests {
             strip_trailing_digits: true,
             forward_classname: true,
             local_svg_import: false,
-            overrides:overrides
+            overrides: overrides
                 .iter()
                 .map(|(k, v)| (k.to_string(), OverrideValue::Name(v.to_string())))
                 .collect(),
@@ -587,10 +588,7 @@ const imgUnknown = "y";
 
     #[test]
     fn scan_with_strip_trailing_digits() {
-        let tmp = std::env::temp_dir().join(format!(
-            "figma-code-dl-icons-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("figma-code-dl-icons-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join("ChevronForward.tsx"), "").unwrap();
@@ -605,7 +603,7 @@ const imgUnknown = "y";
             strip_trailing_digits: true,
             forward_classname: true,
             local_svg_import: false,
-            overrides:Default::default(),
+            overrides: Default::default(),
         };
         let out = process(src, &cfg).unwrap();
         assert!(out.body.contains("<ChevronForward />"));
@@ -629,7 +627,7 @@ const imgUnknown = "y";
             strip_trailing_digits: true,
             forward_classname: true,
             local_svg_import: false,
-            overrides:Default::default(),
+            overrides: Default::default(),
         };
         let out = process(src, &cfg).unwrap();
         assert!(out.body.contains("const imgFoo"));

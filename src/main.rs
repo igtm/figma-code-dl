@@ -342,9 +342,7 @@ async fn main() -> Result<()> {
     if let Some(path) = trim_cfg_path {
         let cfg = trim::TrimConfig::load(&path)?;
         let (trimmed, report) = trim::trim(&body_after_assets, &cfg);
-        let saved_bytes = report
-            .bytes_before
-            .saturating_sub(report.bytes_after);
+        let saved_bytes = report.bytes_before.saturating_sub(report.bytes_after);
         let pct = if report.bytes_before > 0 {
             (saved_bytes as f64) / (report.bytes_before as f64) * 100.0
         } else {
@@ -386,8 +384,7 @@ async fn main() -> Result<()> {
     let body_with_asset_note = inject_asset_const_note(&body_after_assets);
     let output = format!("{header}{}{}", imports_block, body_with_asset_note);
 
-    std::fs::write(out_path, &output)
-        .with_context(|| format!("writing {}", out_path.display()))?;
+    std::fs::write(out_path, &output).with_context(|| format!("writing {}", out_path.display()))?;
     eprintln!("→ wrote {} ({} bytes)", out_path.display(), output.len());
     Ok(())
 }

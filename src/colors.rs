@@ -143,7 +143,7 @@ fn normalize_hex(s: &str) -> Option<String> {
     let expanded: String = match chars.len() {
         3 if chars.iter().all(|c| c.is_ascii_hexdigit()) => chars
             .iter()
-            .flat_map(|c| std::iter::repeat(*c).take(2))
+            .flat_map(|c| std::iter::repeat_n(*c, 2))
             .collect(),
         6 if chars.iter().all(|c| c.is_ascii_hexdigit()) => s.to_string(),
         _ => return None,
