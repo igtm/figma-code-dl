@@ -177,7 +177,9 @@ figma-code-dl --from-json /tmp/figma-resp.json \
 | `--screenshot <path>` | Save a PNG of the target node via MCP `get_screenshot`. Works on `section` nodes too. Can run standalone (no `--out`) |
 | `--screenshot-contents-only` | Pass `contentsOnly: true` to `get_screenshot` (render the node in isolation, ignoring overlapping canvas content). Default is `false` |
 | `--no-activate` | Skip auto-activating the Figma desktop tab before MCP calls (macOS default-on). Useful when you've already brought the right tab to the foreground and don't want the focus shuffle |
-| `--activate-wait-ms <ms>` | Milliseconds to wait after `open -a Figma <url>` to let the desktop app switch tabs before the MCP call lands. Default `800` |
+| `--activate-wait-ms <ms>` | Pre-probe sleep added right after `open -a Figma <url>`. Default `0` because the probe loop below already polls; raise it only to skip a few probe round-trips on known-slow setups |
+| `--activate-probe-attempts <n>` | Max `get_metadata` probes confirming the active tab now contains the target nodeId. Default `30` |
+| `--activate-probe-interval-ms <ms>` | Sleep between probe attempts. Default `300` → up to 9s of tolerance for slow Figma tab switches |
 
 ## Instance replacement (`.figma/instance-map.json`)
 

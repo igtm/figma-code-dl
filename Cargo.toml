@@ -1,6 +1,6 @@
 [package]
 name = "figma-code-dl"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024"
 description = "Pull a Figma node from the local Dev Mode MCP server, post-process into a clean React+Tailwind TSX file, replace inlined instances with codebase components, and download assets locally."
 authors = ["Tomokatsu Iguchi"]

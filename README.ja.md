@@ -164,7 +164,9 @@ figma-code-dl --from-json /tmp/figma-resp.json \
 | `--screenshot <path>` | MCP `get_screenshot` で対象ノードの PNG を保存。`section` ノードでも動く。`--out` 無しでも単独実行可 |
 | `--screenshot-contents-only` | `get_screenshot` に `contentsOnly: true` を渡す（重なっているキャンバス上の他要素を含めず、ノード単体で render）。既定は `false` |
 | `--no-activate` | MCP 呼出前の Figma タブ自動アクティブ化を無効化（macOS 既定 ON）。既に手動でアクティブ化済みで focus を奪われたくないとき用 |
-| `--activate-wait-ms <ms>` | `open -a Figma <url>` 後にタブ切替を待つミリ秒。既定 `800` |
+| `--activate-wait-ms <ms>` | `open -a Figma <url>` 後、probe ループ前の固定 sleep。既定 `0`（poll するので不要）。Figma が極端に遅い環境で probe 回数を減らしたいときだけ上げる |
+| `--activate-probe-attempts <n>` | アクティブタブが対象 nodeId を持っているか `get_metadata` で確認する最大回数。既定 `30` |
+| `--activate-probe-interval-ms <ms>` | probe 間の待機ミリ秒。既定 `300` → 最大 9 秒まで Figma のタブ切替を許容 |
 
 ## Instance 置換 (`.figma/instance-map.json`)
 

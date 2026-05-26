@@ -130,11 +130,24 @@ struct Args {
     #[arg(long)]
     no_activate: bool,
 
-    /// Milliseconds to wait after running `open -a "Figma" <url>` to give
-    /// the desktop app time to switch tabs before the MCP call lands.
-    /// Default is 800ms.
-    #[arg(long, default_value_t = 800)]
+    /// Milliseconds to sleep right after `open -a "Figma" <url>`, before
+    /// the active-tab probe loop kicks in. The default is 0 because the
+    /// probe (described below) already polls until the tab is ready, but
+    /// raising this can shave a few probe round-trips off the happy path
+    /// when Figma is known to be slow.
+    #[arg(long, default_value_t = 0)]
     activate_wait_ms: u64,
+
+    /// Max number of `get_metadata` probes done after activation to confirm
+    /// the right Figma tab is live before the main MCP call. Each probe is
+    /// `--activate-probe-interval-ms` apart; total ceiling is `attempts × interval`.
+    /// Default: 30 attempts × 300ms = 9s, which handles even slow tab-switches.
+    #[arg(long, default_value_t = 30)]
+    activate_probe_attempts: u32,
+
+    /// Milliseconds between active-tab probe attempts. See `--activate-probe-attempts`.
+    #[arg(long, default_value_t = 300)]
+    activate_probe_interval_ms: u64,
 }
 
 #[tokio::main]
@@ -197,6 +210,15 @@ async fn main() -> Result<()> {
         let client = mcp::McpClient::new(args.mcp_url.clone());
         client.initialize().await.context("MCP initialize")?;
         eprintln!("→ MCP initialized at {}", args.mcp_url);
+        if !args.no_activate {
+            wait_for_active_node(
+                &client,
+                &node_id,
+                args.activate_probe_attempts,
+                args.activate_probe_interval_ms,
+            )
+            .await?;
+        }
 
         if let Some(dump_path) = &args.dump_variables {
             let report = variables_dump::dump(&client, &node_id, dump_path).await?;
@@ -239,7 +261,15 @@ async fn main() -> Result<()> {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("either <url> or `--from-json <path>` is required"))?;
         let node_id = figma_url::parse(url).context("parsing Figma URL")?.node_id;
-        fetch_via_mcp(&args.mcp_url, &node_id, abs_assets_dir.as_deref()).await?
+        let probe = if args.no_activate {
+            None
+        } else {
+            Some((
+                args.activate_probe_attempts,
+                args.activate_probe_interval_ms,
+            ))
+        };
+        fetch_via_mcp(&args.mcp_url, &node_id, abs_assets_dir.as_deref(), probe).await?
     };
 
     if let Some(p) = &args.dump_raw {
@@ -504,9 +534,11 @@ fn activate_figma_tab(url: &str, wait_ms: u64) {
         .status()
     {
         Ok(status) if status.success() => {
-            eprintln!("→ activated Figma tab ({} ms wait)", wait_ms);
             if wait_ms > 0 {
+                eprintln!("→ activated Figma tab (+{}ms sleep before probe)", wait_ms);
                 std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            } else {
+                eprintln!("→ activated Figma tab");
             }
         }
         Ok(status) => {
@@ -561,10 +593,15 @@ async fn fetch_via_mcp(
     endpoint: &str,
     node_id: &str,
     assets_dir: Option<&std::path::Path>,
+    activate_probe: Option<(u32, u64)>,
 ) -> Result<Vec<extract::ContentBlock>> {
     let client = mcp::McpClient::new(endpoint.to_string());
     client.initialize().await.context("MCP initialize")?;
     eprintln!("→ MCP initialized at {endpoint}");
+
+    if let Some((attempts, interval_ms)) = activate_probe {
+        wait_for_active_node(&client, node_id, attempts, interval_ms).await?;
+    }
 
     let mut tool_args = serde_json::json!({
         "nodeId": node_id,
@@ -580,4 +617,56 @@ async fn fetch_via_mcp(
     let blocks = client.call_tool("get_design_context", tool_args).await?;
     eprintln!("→ received {} content block(s)", blocks.len());
     Ok(blocks)
+}
+
+/// Poll `get_metadata` on the target nodeId until the Figma desktop app's
+/// active tab actually contains it. Returns `Ok` on the first probe that
+/// doesn't fail with "No node could be found". This compensates for the
+/// fact that `open -a "Figma" <url>` returns immediately but the desktop
+/// app can take an unbounded amount of time to actually switch tabs —
+/// especially for larger files.
+async fn wait_for_active_node(
+    client: &mcp::McpClient,
+    node_id: &str,
+    max_attempts: u32,
+    interval_ms: u64,
+) -> Result<()> {
+    let mut last_err: Option<anyhow::Error> = None;
+    for attempt in 1..=max_attempts {
+        match client
+            .call_tool("get_metadata", serde_json::json!({ "nodeId": node_id }))
+            .await
+        {
+            Ok(_) => {
+                if attempt > 1 {
+                    eprintln!(
+                        "→ Figma active tab is on the right file (after {} probe(s), ~{}ms)",
+                        attempt,
+                        (attempt as u64).saturating_sub(1) * interval_ms
+                    );
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                let retryable = msg.contains("No node could be found");
+                last_err = Some(e);
+                if !retryable {
+                    break;
+                }
+                if attempt < max_attempts {
+                    tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+                }
+            }
+        }
+    }
+    let err = last_err
+        .unwrap_or_else(|| anyhow::anyhow!("active-tab probe failed without producing an error"));
+    Err(err).with_context(|| {
+        format!(
+            "active Figma tab did not contain node {node_id} after {} probe(s) × {}ms; \
+             is the file open in Figma Desktop and is `open -a Figma` working on this machine?",
+            max_attempts, interval_ms
+        )
+    })
 }
