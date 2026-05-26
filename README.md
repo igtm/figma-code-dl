@@ -40,6 +40,10 @@ Given a Figma URL, `figma-code-dl`:
 9. **Optionally trims redundant Tailwind classes and layer-metadata
    attributes** per a TOML config (`--trim` / `--trim-config`), to keep the
    output small for both humans and LLMs that will later read it.
+10. **Optionally captures a PNG screenshot of the node** via MCP
+    `get_screenshot` (`--screenshot <path>`). Unlike `get_design_context`,
+    this works on `section` nodes too, so it's useful as a quick preview
+    when a URL turns out to be a section and the code path can't run.
 
 No authentication, no OAuth, no API keys — the Figma desktop app handles
 auth via its existing Figma session, and exposes the MCP endpoint on
@@ -164,6 +168,8 @@ figma-code-dl --from-json /tmp/figma-resp.json \
 | `--colors` | Enable the colors pass. Rewrites bare `[#XXXXXX]` to `[var(--name,#XXX)]` per `.figma/variables.json` |
 | `--colors-file <path>` | Explicit path to the variables file. Implies `--colors` |
 | `--dump-variables <path>` | Fetch Figma Variables via MCP `get_variable_defs` and write them to this path. Can run standalone (no `--out`) |
+| `--screenshot <path>` | Save a PNG of the target node via MCP `get_screenshot`. Works on `section` nodes too. Can run standalone (no `--out`) |
+| `--screenshot-contents-only` | Pass `contentsOnly: true` to `get_screenshot` (render the node in isolation, ignoring overlapping canvas content). Default is `false` |
 
 ## Instance replacement (`.figma/instance-map.json`)
 
@@ -389,7 +395,9 @@ When `--download-assets <dir>` is given:
 ## Limitations / known issues
 
 - Section nodes don't return code from the MCP — only metadata pointing at
-  child frames. Re-fetch on a specific child frame.
+  child frames. Re-fetch on a specific child frame. (Tip: `--screenshot` still
+  works on sections, so you can use it standalone to preview what a section
+  URL points at without recursing.)
 - Cloud-style asset URLs (`https://www.figma.com/api/mcp/asset/<uuid>`,
   produced when `--from-json` is used with a cloud MCP capture) expire after
   7 days; use `--download-assets` for anything you intend to keep.

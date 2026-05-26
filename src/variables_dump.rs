@@ -370,6 +370,8 @@ mod tests {
         ContentBlock {
             block_type: "text".into(),
             text: text.into(),
+            data: None,
+            mime_type: None,
         }
     }
 

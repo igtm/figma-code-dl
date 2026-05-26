@@ -12,6 +12,7 @@ mod imports;
 mod instance_map;
 mod mcp;
 mod replace;
+mod screenshot;
 mod trim;
 mod variables_dump;
 
@@ -106,14 +107,29 @@ struct Args {
     /// (without `--out`), only the dump runs.
     #[arg(long)]
     dump_variables: Option<PathBuf>,
+
+    /// Capture a PNG screenshot of the target node via MCP `get_screenshot`
+    /// and write it to this path. Works on `section` nodes too (where
+    /// `get_design_context` would fail), so this can be a standalone
+    /// preview-only run with no `--out`.
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
+
+    /// Pass `contentsOnly: true` to `get_screenshot` so the node is rendered
+    /// in isolation, without anything that visually overlaps it on the
+    /// canvas. Default is `false` (canvas-as-seen rendering).
+    #[arg(long)]
+    screenshot_contents_only: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    if args.out.is_none() && args.dump_variables.is_none() {
-        bail!("either `--out <path>` or `--dump-variables <path>` (or both) is required");
+    if args.out.is_none() && args.dump_variables.is_none() && args.screenshot.is_none() {
+        bail!(
+            "at least one of `--out <path>`, `--dump-variables <path>`, or `--screenshot <path>` is required"
+        );
     }
 
     let source_url = args.source_url.clone().or_else(|| args.url.clone());
@@ -139,28 +155,46 @@ async fn main() -> Result<()> {
         })
         .transpose()?;
 
-    // Variable dump may need its own MCP session (different tool, same server).
-    // We handle it before the design-context fetch so it can run standalone.
-    if let Some(dump_path) = &args.dump_variables {
-        let node_id_for_dump = target.as_ref().map(|t| t.node_id.clone()).or_else(|| {
+    // Standalone-capable MCP operations: variable dump and screenshot. Both
+    // only need a nodeId from the URL and a single MCP session, and either
+    // can be used without `--out` so a one-shot survey is possible.
+    let needs_standalone_mcp = args.dump_variables.is_some() || args.screenshot.is_some();
+    if needs_standalone_mcp {
+        let node_id_for_mcp = target.as_ref().map(|t| t.node_id.clone()).or_else(|| {
             args.url
                 .as_deref()
                 .and_then(|u| figma_url::parse(u).ok().map(|t| t.node_id))
         });
-        let Some(node_id) = node_id_for_dump else {
-            bail!("--dump-variables requires <url> so that a nodeId can be passed to MCP");
+        let Some(node_id) = node_id_for_mcp else {
+            bail!("--dump-variables / --screenshot require <url> so a nodeId can be passed to MCP");
         };
         let client = mcp::McpClient::new(args.mcp_url.clone());
         client.initialize().await.context("MCP initialize")?;
         eprintln!("→ MCP initialized at {}", args.mcp_url);
-        let report = variables_dump::dump(&client, &node_id, dump_path).await?;
-        eprintln!(
-            "→ dumped {} variable(s) ({} with codeSyntax.WEB) to {}",
-            report.variables_total,
-            report.variables_with_codesyntax,
-            dump_path.display()
-        );
-        eprintln!("    raw MCP response: {}", report.raw_path.display());
+
+        if let Some(dump_path) = &args.dump_variables {
+            let report = variables_dump::dump(&client, &node_id, dump_path).await?;
+            eprintln!(
+                "→ dumped {} variable(s) ({} with codeSyntax.WEB) to {}",
+                report.variables_total,
+                report.variables_with_codesyntax,
+                dump_path.display()
+            );
+            eprintln!("    raw MCP response: {}", report.raw_path.display());
+        }
+
+        if let Some(shot_path) = &args.screenshot {
+            let report =
+                screenshot::capture(&client, &node_id, args.screenshot_contents_only, shot_path)
+                    .await?;
+            eprintln!(
+                "→ screenshot: {} bytes ({}) → {}",
+                report.bytes_written,
+                report.mime_type,
+                shot_path.display()
+            );
+        }
+
         if args.out.is_none() {
             return Ok(());
         }

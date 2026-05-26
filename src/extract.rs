@@ -11,6 +11,13 @@ pub struct ContentBlock {
     pub block_type: String,
     #[serde(default)]
     pub text: String,
+    /// Base64-encoded payload for image content blocks (block_type == "image").
+    /// Returned by tools like `get_screenshot`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    /// MIME type for image / binary blocks, e.g. `"image/png"`.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "mimeType")]
+    pub mime_type: Option<String>,
 }
 
 pub struct Extracted {
@@ -95,6 +102,8 @@ mod tests {
         ContentBlock {
             block_type: "text".into(),
             text: text.into(),
+            data: None,
+            mime_type: None,
         }
     }
 
