@@ -28,6 +28,11 @@ pub struct McpClient {
     session_id: Mutex<Option<String>>,
     protocol_version: Mutex<Option<String>>,
     next_id: AtomicU64,
+    /// Total `call_tool` attempts when the server reports
+    /// "No node could be found ..." (a typical signal that Figma desktop
+    /// has not yet switched to the right tab). `1` means no retry.
+    inactive_retry_attempts: u32,
+    inactive_retry_interval_ms: u64,
 }
 
 impl McpClient {
@@ -42,7 +47,18 @@ impl McpClient {
             session_id: Mutex::new(None),
             protocol_version: Mutex::new(None),
             next_id: AtomicU64::new(1),
+            inactive_retry_attempts: 1,
+            inactive_retry_interval_ms: 300,
         }
+    }
+
+    /// Retry every `call_tool` up to `attempts` times whenever the server
+    /// responds with "No node could be found", waiting `interval_ms` between
+    /// attempts. Use `attempts = 1` to disable retry.
+    pub fn with_inactive_retry(mut self, attempts: u32, interval_ms: u64) -> Self {
+        self.inactive_retry_attempts = attempts.max(1);
+        self.inactive_retry_interval_ms = interval_ms;
+        self
     }
 
     pub async fn initialize(&self) -> Result<()> {
@@ -95,6 +111,41 @@ impl McpClient {
     }
 
     pub async fn call_tool(&self, name: &str, args: Value) -> Result<Vec<ContentBlock>> {
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=self.inactive_retry_attempts {
+            match self.call_tool_once(name, args.clone()).await {
+                Ok(blocks) => {
+                    if attempt > 1 {
+                        eprintln!(
+                            "→ {name} settled on attempt {} (waited ~{}ms total)",
+                            attempt,
+                            (attempt - 1) as u64 * self.inactive_retry_interval_ms
+                        );
+                    }
+                    return Ok(blocks);
+                }
+                Err(e) => {
+                    let retryable = e.to_string().contains("No node could be found");
+                    if !retryable || attempt == self.inactive_retry_attempts {
+                        return Err(e);
+                    }
+                    if attempt == 1 {
+                        eprintln!(
+                            "→ active tab not ready for {name}; retrying (up to {} attempts × {}ms)",
+                            self.inactive_retry_attempts, self.inactive_retry_interval_ms
+                        );
+                    }
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(self.inactive_retry_interval_ms))
+                        .await;
+                }
+            }
+        }
+        Err(last_err
+            .unwrap_or_else(|| anyhow!("retry loop for tools/call {name} exited without an error")))
+    }
+
+    async fn call_tool_once(&self, name: &str, args: Value) -> Result<Vec<ContentBlock>> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let body = json!({
             "jsonrpc": "2.0",

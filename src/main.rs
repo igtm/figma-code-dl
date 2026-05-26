@@ -138,16 +138,18 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     activate_wait_ms: u64,
 
-    /// Max number of `get_metadata` probes done after activation to confirm
-    /// the right Figma tab is live before the main MCP call. Each probe is
-    /// `--activate-probe-interval-ms` apart; total ceiling is `attempts × interval`.
-    /// Default: 30 attempts × 300ms = 9s, which handles even slow tab-switches.
-    #[arg(long, default_value_t = 30)]
-    activate_probe_attempts: u32,
+    /// Max number of attempts at each MCP tool call (`get_design_context`,
+    /// `get_screenshot`, `get_variable_defs`). The retry only triggers when
+    /// the server reports "No node could be found" — i.e. the Figma desktop
+    /// app's active tab hasn't switched to the right file yet. Each attempt
+    /// is `--mcp-retry-interval-ms` apart. Default: 10 × 300ms = ~3s of
+    /// tolerance for slow tab switches. Set to 1 to disable.
+    #[arg(long, default_value_t = 10)]
+    mcp_retry_attempts: u32,
 
-    /// Milliseconds between active-tab probe attempts. See `--activate-probe-attempts`.
+    /// Milliseconds between `call_tool` attempts. See `--mcp-retry-attempts`.
     #[arg(long, default_value_t = 300)]
-    activate_probe_interval_ms: u64,
+    mcp_retry_interval_ms: u64,
 }
 
 #[tokio::main]
@@ -207,18 +209,15 @@ async fn main() -> Result<()> {
         let Some(node_id) = node_id_for_mcp else {
             bail!("--dump-variables / --screenshot require <url> so a nodeId can be passed to MCP");
         };
-        let client = mcp::McpClient::new(args.mcp_url.clone());
+        let retry = if args.no_activate {
+            (1u32, 0u64)
+        } else {
+            (args.mcp_retry_attempts, args.mcp_retry_interval_ms)
+        };
+        let client =
+            mcp::McpClient::new(args.mcp_url.clone()).with_inactive_retry(retry.0, retry.1);
         client.initialize().await.context("MCP initialize")?;
         eprintln!("→ MCP initialized at {}", args.mcp_url);
-        if !args.no_activate {
-            wait_for_active_node(
-                &client,
-                &node_id,
-                args.activate_probe_attempts,
-                args.activate_probe_interval_ms,
-            )
-            .await?;
-        }
 
         if let Some(dump_path) = &args.dump_variables {
             let report = variables_dump::dump(&client, &node_id, dump_path).await?;
@@ -261,15 +260,12 @@ async fn main() -> Result<()> {
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("either <url> or `--from-json <path>` is required"))?;
         let node_id = figma_url::parse(url).context("parsing Figma URL")?.node_id;
-        let probe = if args.no_activate {
-            None
+        let retry = if args.no_activate {
+            (1u32, 0u64)
         } else {
-            Some((
-                args.activate_probe_attempts,
-                args.activate_probe_interval_ms,
-            ))
+            (args.mcp_retry_attempts, args.mcp_retry_interval_ms)
         };
-        fetch_via_mcp(&args.mcp_url, &node_id, abs_assets_dir.as_deref(), probe).await?
+        fetch_via_mcp(&args.mcp_url, &node_id, abs_assets_dir.as_deref(), retry).await?
     };
 
     if let Some(p) = &args.dump_raw {
@@ -593,15 +589,11 @@ async fn fetch_via_mcp(
     endpoint: &str,
     node_id: &str,
     assets_dir: Option<&std::path::Path>,
-    activate_probe: Option<(u32, u64)>,
+    retry: (u32, u64),
 ) -> Result<Vec<extract::ContentBlock>> {
-    let client = mcp::McpClient::new(endpoint.to_string());
+    let client = mcp::McpClient::new(endpoint.to_string()).with_inactive_retry(retry.0, retry.1);
     client.initialize().await.context("MCP initialize")?;
     eprintln!("→ MCP initialized at {endpoint}");
-
-    if let Some((attempts, interval_ms)) = activate_probe {
-        wait_for_active_node(&client, node_id, attempts, interval_ms).await?;
-    }
 
     let mut tool_args = serde_json::json!({
         "nodeId": node_id,
@@ -614,59 +606,21 @@ async fn fetch_via_mcp(
             serde_json::Value::String(dir.to_string_lossy().to_string());
     }
 
-    let blocks = client.call_tool("get_design_context", tool_args).await?;
+    let blocks = client
+        .call_tool("get_design_context", tool_args)
+        .await
+        .with_context(|| {
+            format!(
+                "fetching `get_design_context` for node {node_id}.\n\n\
+                 If the error above is \"No node could be found\":\n  \
+                 - Make sure Figma Desktop has the file open and the right tab is active.\n  \
+                 - The URL may point to a node type `get_design_context` doesn't support \
+                 (e.g. a page or a deeply nested container). Try `--screenshot <path>` \
+                 with the same URL — if that succeeds, the node exists but isn't \
+                 code-extractable; drill into a specific child frame and pass that nodeId.\n\n\
+                 If it mentions \"section\": pass a child frame's nodeId."
+            )
+        })?;
     eprintln!("→ received {} content block(s)", blocks.len());
     Ok(blocks)
-}
-
-/// Poll `get_metadata` on the target nodeId until the Figma desktop app's
-/// active tab actually contains it. Returns `Ok` on the first probe that
-/// doesn't fail with "No node could be found". This compensates for the
-/// fact that `open -a "Figma" <url>` returns immediately but the desktop
-/// app can take an unbounded amount of time to actually switch tabs —
-/// especially for larger files.
-async fn wait_for_active_node(
-    client: &mcp::McpClient,
-    node_id: &str,
-    max_attempts: u32,
-    interval_ms: u64,
-) -> Result<()> {
-    let mut last_err: Option<anyhow::Error> = None;
-    for attempt in 1..=max_attempts {
-        match client
-            .call_tool("get_metadata", serde_json::json!({ "nodeId": node_id }))
-            .await
-        {
-            Ok(_) => {
-                if attempt > 1 {
-                    eprintln!(
-                        "→ Figma active tab is on the right file (after {} probe(s), ~{}ms)",
-                        attempt,
-                        (attempt as u64).saturating_sub(1) * interval_ms
-                    );
-                }
-                return Ok(());
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                let retryable = msg.contains("No node could be found");
-                last_err = Some(e);
-                if !retryable {
-                    break;
-                }
-                if attempt < max_attempts {
-                    tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
-                }
-            }
-        }
-    }
-    let err = last_err
-        .unwrap_or_else(|| anyhow::anyhow!("active-tab probe failed without producing an error"));
-    Err(err).with_context(|| {
-        format!(
-            "active Figma tab did not contain node {node_id} after {} probe(s) × {}ms; \
-             is the file open in Figma Desktop and is `open -a Figma` working on this machine?",
-            max_attempts, interval_ms
-        )
-    })
 }
