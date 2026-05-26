@@ -120,6 +120,21 @@ struct Args {
     /// canvas. Default is `false` (canvas-as-seen rendering).
     #[arg(long)]
     screenshot_contents_only: bool,
+
+    /// Skip auto-activating the Figma desktop tab before MCP calls. By
+    /// default (macOS only), `figma-code-dl` runs `open -a "Figma" <url>`
+    /// before any MCP call so the Dev Mode MCP server sees the right active
+    /// tab, even when the user was on a different file. Pass this flag to
+    /// turn that off — useful if you've already activated the tab manually
+    /// and don't want the focus shuffle.
+    #[arg(long)]
+    no_activate: bool,
+
+    /// Milliseconds to wait after running `open -a "Figma" <url>` to give
+    /// the desktop app time to switch tabs before the MCP call lands.
+    /// Default is 800ms.
+    #[arg(long, default_value_t = 800)]
+    activate_wait_ms: u64,
 }
 
 #[tokio::main]
@@ -136,6 +151,17 @@ async fn main() -> Result<()> {
     let target = source_url.as_deref().and_then(|u| figma_url::parse(u).ok());
     if let Some(t) = &target {
         eprintln!("→ nodeId={}", t.node_id);
+    }
+
+    // Bring the right Figma tab to the foreground before any MCP call, so the
+    // server (which operates on the active tab) finds the node we asked for.
+    // No-op when reading from JSON (no live MCP), when `--no-activate` is set,
+    // and on non-macOS platforms.
+    if let Some(url) = args.url.as_deref()
+        && !args.no_activate
+        && args.from_json.is_none()
+    {
+        activate_figma_tab(url, args.activate_wait_ms);
     }
 
     if let Some(out) = &args.out
@@ -458,6 +484,43 @@ fn inject_asset_const_note(body: &str) -> String {
             out
         }
         None => body.to_string(),
+    }
+}
+
+/// Tell Figma Desktop to bring the file at `url` to the foreground. macOS
+/// only — `open -a "Figma" <url>` switches the desktop app to that tab. On
+/// other platforms we skip silently and rely on the user having already
+/// activated the right tab.
+///
+/// Failures are reported but non-fatal: if the desktop app isn't installed,
+/// isn't running, or returns non-zero, the MCP call will fail loudly anyway
+/// with a more useful error, so we just continue.
+fn activate_figma_tab(url: &str, wait_ms: u64) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    match std::process::Command::new("open")
+        .args(["-a", "Figma", url])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            eprintln!("→ activated Figma tab ({} ms wait)", wait_ms);
+            if wait_ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            }
+        }
+        Ok(status) => {
+            eprintln!(
+                "WARN: `open -a Figma <url>` exited with {status}; continuing — \
+                 make sure Figma Desktop has the target file active"
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "WARN: failed to run `open -a Figma <url>` ({e}); continuing — \
+                 make sure Figma Desktop has the target file active"
+            );
+        }
     }
 }
 

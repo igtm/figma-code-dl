@@ -68,11 +68,13 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3845/mcp \
 
 local Dev Mode MCP は **Figma Desktop で今アクティブになっているタブのファイル** に対してしか動きません。URL の fileKey は飾りで、active tab が違うファイルだと `get_metadata` / `get_design_context` / `get_variable_defs` のいずれも `No node could be found ...` で失敗します。
 
-なので **MCP を叩く前に必ずユーザーに確認**してください。最初に次のように聞いてから作業に入る：
+ただし **`figma-code-dl` CLI を使う場合は macOS なら自動で対応されます** — 内部で `open -a "Figma" <url>` を実行してから 800ms 待って MCP を叩く（`--no-activate` で無効化可）。なので CLI 経由のときはユーザーに確認しなくて良い。
 
-> Figma Desktop で対象のファイルを開いて、**そのタブをアクティブ（最前面）** にしてください。準備できたら教えてください。
+CLI を使わず Claude から直接 MCP tool（`mcp__plugin_figma_figma__get_*` 系）を叩く場合や、macOS 以外の環境のときは、念のため：
 
-これが終わったら以下のフローへ。
+> Figma Desktop で対象のファイルを開いて、**そのタブをアクティブ（最前面）** にしてください。
+
+を最初に聞いてから作業に入る。
 
 ## いつ発火するか
 

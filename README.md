@@ -44,6 +44,10 @@ Given a Figma URL, `figma-code-dl`:
     `get_screenshot` (`--screenshot <path>`). Unlike `get_design_context`,
     this works on `section` nodes too, so it's useful as a quick preview
     when a URL turns out to be a section and the code path can't run.
+11. **Auto-activates the target Figma file** on macOS via
+    `open -a "Figma" <url>` before any MCP call, so the Dev Mode MCP (which
+    operates on the active tab) sees the right file even when the user was
+    on a different file. Disable with `--no-activate`.
 
 No authentication, no OAuth, no API keys — the Figma desktop app handles
 auth via its existing Figma session, and exposes the MCP endpoint on
@@ -52,8 +56,10 @@ loopback only when you opt in.
 ## Prerequisites
 
 - **Figma desktop app** installed and running
-- Open the design file you want to pull from, and make sure it's the
-  **active tab** (no need to click/select any specific node inside the file)
+- On macOS, `figma-code-dl` runs `open -a "Figma" <url>` itself before any
+  MCP call, so the right file becomes the active tab automatically. On
+  other platforms, open the design file you want to pull from and make
+  sure it's the **active tab** before invoking the CLI.
 - `Figma menu → Preferences → "Enable Dev Mode MCP server"` is **on**
 - Sanity check:
   ```bash
@@ -170,6 +176,8 @@ figma-code-dl --from-json /tmp/figma-resp.json \
 | `--dump-variables <path>` | Fetch Figma Variables via MCP `get_variable_defs` and write them to this path. Can run standalone (no `--out`) |
 | `--screenshot <path>` | Save a PNG of the target node via MCP `get_screenshot`. Works on `section` nodes too. Can run standalone (no `--out`) |
 | `--screenshot-contents-only` | Pass `contentsOnly: true` to `get_screenshot` (render the node in isolation, ignoring overlapping canvas content). Default is `false` |
+| `--no-activate` | Skip auto-activating the Figma desktop tab before MCP calls (macOS default-on). Useful when you've already brought the right tab to the foreground and don't want the focus shuffle |
+| `--activate-wait-ms <ms>` | Milliseconds to wait after `open -a Figma <url>` to let the desktop app switch tabs before the MCP call lands. Default `800` |
 
 ## Instance replacement (`.figma/instance-map.json`)
 
